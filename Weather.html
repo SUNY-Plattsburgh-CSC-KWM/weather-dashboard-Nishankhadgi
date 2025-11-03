@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSC313 Weather Dashboard – Open‑Meteo</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #ffffff;
+      color: #222;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: #f2f2f2;
+      border-bottom: 1px solid #ccc;
+      padding: 15px 20px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 22px;
+    }
+    main {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      padding: 20px;
+    }
+    section.panel {
+      background: #fafafa;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 15px;
+      flex: 1;
+      min-width: 300px;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 10px;
+    }
+    input, select, button {
+      width: 100%;
+      padding: 8px;
+      margin-top: 5px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px;
+    }
+    .card {
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      box-shadow: 1px 1px 3px rgba(0,0,0,0.1);
+    }
+    .wx-emoji {
+      font-size: 32px;
+    }
+    #chart {
+      margin-top: 15px;
+    }
+    svg {
+      background: #fff;
+      border: 1px solid #ccc;
+    }
+    footer {
+      text-align: center;
+      padding: 10px;
+      color: #555;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CSC313 Weather Dashboard</h1>
+  </header>
+  <main>
+    <section class="panel">
+      <form id="controls">
+        <label>Latitude</label>
+        <input id="lat" type="number" step="0.0001" value="44.6995" required>
+        <label>Longitude</label>
+        <input id="lon" type="number" step="0.0001" value="-73.4529" required>
+        <label>Mode</label>
+        <select id="mode">
+          <option value="forecast">Forecast</option>
+          <option value="historical">Historical</option>
+        </select>
+        <div id="forecastBlock">
+          <label>Days (1–16)</label>
+          <input id="days" type="number" min="1" max="16" value="7">
+        </div>
+        <div id="historicalBlock" style="display:none;">
+          <label>Start date</label>
+          <input id="start" type="date">
+          <label>End date</label>
+          <input id="end" type="date">
+          <label>Parameter</label>
+          <select id="params" multiple size="4">
+            <option value="temperature_2m" selected>Temperature</option>
+            <option value="dewpoint_2m">Dewpoint</option>
+            <option value="relative_humidity_2m">Humidity</option>
+            <option value="wind_speed_10m">Wind Speed</option>
+          </select>
+        </div>
+        <label>Temperature Unit</label>
+        <select id="units">
+          <option value="c">Celsius</option>
+          <option value="f">Fahrenheit</option>
+        </select>
+        <button type="submit">Fetch Data</button>
+      </form>
+    </section>
+    <section class="panel">
+      <div id="forecast" class="cards"></div>
+      <div id="chart"><svg id="svg" width="100%" height="400"></svg></div>
+    </section>
+  </main>
+  <footer>
+    Data provided by <a href="https://open-meteo.com" target="_blank">Open‑Meteo</a>
+  </footer>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script>
+    const latEl = document.getElementById('lat');
+    const lonEl = document.getElementById('lon');
+    const modeEl = document.getElementById('mode');
+    const forecastEl = document.getElementById('forecastBlock');
+    const histEl = document.getElementById('historicalBlock');
+
+    modeEl.addEventListener('change', () => {
+      if(modeEl.value === 'forecast') {
+        forecastEl.style.display = '';
+        histEl.style.display = 'none';
+      } else {
+        forecastEl.style.display = 'none';
+        histEl.style.display = '';
+      }
+    });
+
+    function wxIcon(code){
+      const map = {
+        0:"☀️",1:"🌤️",2:"⛅",3:"☁️",45:"🌫️",48:"🌫️",51:"🌦️",53:"🌦️",55:"🌧️",61:"🌧️",63:"🌧️",65:"🌧️",71:"❄️",73:"❄️",75:"❄️",95:"⛈️",99:"⛈️"
+      };
+      return map[code] || "🌡️";
+    }
+
+    function toF(c){ return c * 9/5 + 32; }
+
+    async function fetchForecast(lat, lon, days){
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,weathercode&forecast_days=${days}&timezone=auto`;
+      const res = await fetch(url);
+      return res.json();
+    }
+
+    function renderForecast(data, unit){
+      const wrap = document.getElementById('forecast');
+      wrap.innerHTML = '';
+      data.daily.time.forEach((t,i)=>{
+        let tmax = data.daily.temperature_2m_max[i];
+        let tmin = data.daily.temperature_2m_min[i];
+        if(unit==='f'){ tmax = toF(tmax); tmin = toF(tmin); }
+        const code = data.daily.weathercode[i];
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `<div>${new Date(t).toLocaleDateString()}</div><div class='wx-emoji'>${wxIcon(code)}</div><div>High: ${tmax.toFixed(1)}°${unit.toUpperCase()}</div><div>Low: ${tmin.toFixed(1)}°${unit.toUpperCase()}</div>`;
+        wrap.appendChild(card);
+      });
+    }
+
+    document.getElementById('controls').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const lat = parseFloat(latEl.value);
+      const lon = parseFloat(lonEl.value);
+      const unit = document.getElementById('units').value;
+      const mode = modeEl.value;
+
+      if(mode === 'forecast'){
+        const days = document.getElementById('days').value;
+        const data = await fetchForecast(lat, lon, days);
+        renderForecast(data, unit);
+      } else {
+        document.getElementById('forecast').innerHTML = '<p style="color:#555">Historical graph functionality can be added here.</p>';
+      }
+    });
+  </script>
+</body>
+</html>
